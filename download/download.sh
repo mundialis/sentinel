@@ -20,6 +20,12 @@
 user=""
 password=""
 
+# ask for credentials - outcomment if you declare above
+echo "Please enter Username for ESAs Scihub: "
+read user
+echo "Please enter Password: "
+read password
+
 #coordinates need to be in EPSG:4326 like "x1 y1, x2 y2, x3 y3, ..., x1 y1"
 polygonfile="mongolia"
 
@@ -54,7 +60,7 @@ rows="20"
 # Preparing everything for clean start                                #
 #######################################################################
 #cleanup
-rm -f ${answersfile} 
+rm -f ${answersfile}
 #reading polygon bounds
 echo -e "$(tput setaf 2) Reading polygon boundaries..."
 polygon=$(<${polygonfile})
