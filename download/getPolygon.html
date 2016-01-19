@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Get a Polygon</title>
+<script src="https://code.jquery.com/jquery-1.11.2.min.js"></script>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ol3/3.7.0/ol.css" type="text/css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ol3/3.7.0/ol-debug.js"></script>
+<style>
+.ol-popup {
+  position: absolute;
+  background-color: white;
+  -webkit-filter: drop-shadow(0 1px 4px rgba(0,0,0,0.2));
+  filter: drop-shadow(0 1px 4px rgba(0,0,0,0.2));
+  padding: 15px;
+  border-radius: 10px;
+  border: 1px solid #cccccc;
+  bottom: 12px;
+  left: -50px;
+  min-width: 280px;
+}
+.ol-popup:after, .ol-popup:before {
+  top: 100%;
+  border: solid transparent;
+  content: " ";
+  height: 0;
+  width: 0;
+  position: absolute;
+  pointer-events: none;
+}
+.ol-popup:after {
+  border-top-color: white;
+  border-width: 10px;
+  left: 48px;
+  margin-left: -10px;
+}
+.ol-popup:before {
+  border-top-color: #cccccc;
+  border-width: 11px;
+  left: 48px;
+  margin-left: -11px;
+}
+.ol-popup-closer {
+  text-decoration: none;
+  position: absolute;
+  top: 2px;
+  right: 8px;
+}
+.ol-popup-closer:after {
+  content: 'X';
+}
+
+</style>
+</head>
+<body>
+<div class="container-fluid">
+
+<div class="row-fluid">
+  <div class="span12">
+    <div id="map" class="map"></div>
+    <div id="popup" class="ol-popup">
+      <a href="#" id="popup-closer" class="ol-popup-closer"></a>
+      <div id="popup-content"></div>
+    </div>
+    <form class="form-inline">
+      <label>Geometry type &nbsp;</label>
+      <select id="type">
+        <option value="Box">Box</option>
+        <option value="Polygon">Polygon</option>
+        <option value="Square">Square</option>
+        <!--<option value="None">None</option>
+        <option value="Point">Point</option>
+        <option value="LineString">LineString</option>-->
+        <!--<option value="Circle">Circle</option>-->
+      </select>
+    </form>
+  </div>
+</div>
+
+</div>
+<script>
+/* Create Popup */
+var container = document.getElementById('popup');
+var content = document.getElementById('popup-content');
+var closer = document.getElementById('popup-closer');
+closer.onclick = function() {
+  overlay.setPosition(undefined);
+  closer.blur();
+  return false;
+};
+var overlay = new ol.Overlay(({
+  element: container,
+  autoPan: true,
+  autoPanAnimation: {
+    duration: 250
+  }
+}));
+
+var raster = new ol.layer.Tile({
+    //extent: [-13884991, 2870341, -7455066, 6338219],
+    source: new ol.source.TileWMS({
+      url: 'http://ows.mundialis.de/osm/service?',
+      params: {'LAYERS': 'TOPO-OSM-WMS'},
+      serverType: 'geoserver'
+    })
+});
+
+var source = new ol.source.Vector({wrapX: false});
+
+var vector = new ol.layer.Vector({
+  source: source,
+  style: new ol.style.Style({
+    fill: new ol.style.Fill({
+      color: 'rgba(255, 255, 255, 0.2)'
+    }),
+    stroke: new ol.style.Stroke({
+      color: '#ffcc33',
+      width: 2
+    }),
+    image: new ol.style.Circle({
+      radius: 7,
+      fill: new ol.style.Fill({
+        color: '#ffcc33'
+      })
+    })
+  })
+});
+
+var map = new ol.Map({
+  layers: [raster, vector],
+  overlays: [overlay],
+  target: 'map',
+  view: new ol.View({
+    center: [-791641.3586863326, 6575139.598270549],
+    zoom: 3
+  })
+});
+
+var typeSelect = document.getElementById('type');
+
+var draw; // global so we can remove it later
+function addInteraction() {
+  var value = typeSelect.value;
+  if (value !== 'None') {
+    var geometryFunction, maxPoints;
+    if (value === 'Square') {
+      value = 'Circle';
+      geometryFunction = ol.interaction.Draw.createRegularPolygon(4);
+    } else if (value === 'Box') {
+      value = 'LineString';
+      maxPoints = 2;
+      geometryFunction = function(coordinates, geometry) {
+        if (!geometry) {
+          geometry = new ol.geom.Polygon(null);
+        }
+        var start = coordinates[0];
+        var end = coordinates[1];
+        geometry.setCoordinates([
+          [start, [start[0], end[1]], end, [end[0], start[1]], start]
+        ]);
+        return geometry;
+      };
+    }
+    draw = new ol.interaction.Draw({
+      source: source,
+      type: /** @type {ol.geom.GeometryType} */ (value),
+      geometryFunction: geometryFunction,
+      maxPoints: maxPoints
+    });
+    draw.on("drawend", function(evt){
+      var coords = evt.feature.getGeometry().getCoordinates();
+      var coords4326 = []; 
+      for (i=0; i<coords[0].length; i++) {
+      	coords4326.push(ol.proj.transform(coords[0][i], 'EPSG:3857', 'EPSG:4326'));
+      }
+      //var coords=evt.feature.getGeometry().getCoordinates();
+      coords4326 = coords4326.toString().replace(/,/g, " ").replace(/(\s[^\s]*)\s/g,"$1,");
+      console.log(coords4326.toString());
+      console.log(coords[0].length);
+      console.log("3857 is        "+ coords.toString());
+      
+      content.innerHTML = '<p>Your coordinates in EPSG:4326 are:</p><code>' + coords4326.toString() +
+      '</code>';
+      overlay.setPosition(coords[0][1]);
+    });
+    map.addInteraction(draw);
+  }
+}
+
+typeSelect.onchange = function(e) {
+  map.removeInteraction(draw);
+  addInteraction();
+};
+
+addInteraction();
+
+</script>
+</body>
+</html>
