@@ -37,7 +37,8 @@ wget="wget --no-check-certificate --user=${user} --password=${password} --contin
 wgeturl=""
 #... for output files
 outputfolder="output/${polygonfile}/"
-previewfolder="${outputfolder}preview/${polygonfile}/"
+previewfolder="${outputfolder}preview/"
+geometryfolder="${outputfolder}geoms/"
 requestLog="${outputfolder}request_log.txt"
 request="${outputfolder}request.sh"
 originalAnswer="${outputfolder}sentinel-query.xml"
@@ -58,6 +59,7 @@ S2A=""
 UUID=""
 start="0"
 rows="20"
+ol3wkt="${geometryfolder}ol3wkt.js"
 
 #######################################################################
 # Preparing everything for clean start                                #
@@ -70,6 +72,7 @@ polygon=$(<${polygonfile})
 echo -e " Bounds are ... [${polygon}]\n"
 mkdir -p ${outputfolder}
 mkdir -p ${previewfolder}
+mkdir -p ${geometryfolder}
 
 #######################################################################
 # Requesting data which intersects with given polygon                 #
@@ -184,7 +187,7 @@ echo -e "$(tput setaf 2) There are ${newcount} files left with a total size of m
 
 
 #######################################################################
-# Extract preview geometries                                          #
+# Extract preview geometries and ol-ready-copy-paste-text             #
 #######################################################################
 echo
 echo -n "$(tput setaf 6) Do you want to extract ALL preview geometries from the data you requested?"
@@ -192,8 +195,19 @@ read -p "\n ... $(tput bold)(y/n)$(tput sgr0)" -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]
 then
+    #generate openlayer3 snippet for copy-paste in browser       
+    echo "var format = new ol.format.WKT();" >> ${ol3wkt}
     while IFS=, read -r S2A UUID SIZE CLOUD WKT; do
-        echo ${WKT} > ${outputfolder}${UUID}.wkt
+        #generate wkts for each S2A-file        
+        echo ${WKT} > ${geometryfolder}${UUID}.wkt
+        #write echos to ol snippet
+        echo "var feature = format.readFeature('${WKT}');" >> ${ol3wkt}
+        echo "feature.getGeometry().transform('EPSG:4326', 'EPSG:3857');" >> ${ol3wkt}
+        echo "var vector = new ol.layer.Vector({" >> ${ol3wkt}
+        echo "name: '${UUID}'," >> ${ol3wkt}
+        echo "source: new ol.source.Vector({" >> ${ol3wkt}
+        echo "features: [feature] }) })" >> ${ol3wkt}
+        echo "map.addLayer(vector)" >> ${ol3wkt}
     done < ${answersunclouded}
     echo -e "$(tput setaf 2) All Polygons saved"
 fi
