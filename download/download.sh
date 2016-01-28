@@ -27,7 +27,7 @@ echo "Please enter Password: "
 read password
 
 #coordinates need to be in EPSG:4326 like "x1 y1, x2 y2, x3 y3, ..., x1 y1"
-polygonfile="germany"
+polygonfile="mongolia"
 
 #######################################################################
 # Declaring variables which User don't need to touch...               #
@@ -36,7 +36,7 @@ baseUri="https://scihub.esa.int/apihub"
 wget="wget --no-check-certificate --user=${user} --password=${password} --continue"
 wgeturl=""
 #... for output files
-outputfolder="output/"
+outputfolder="output/${polygonfile}/"
 previewfolder="${outputfolder}preview/${polygonfile}/"
 requestLog="${outputfolder}request_log.txt"
 request="${outputfolder}request.sh"
@@ -52,6 +52,7 @@ answerS2A=""
 answerUUID=""
 answerSize=""
 answerCloud=""
+answersWkt=""
 answers=""
 S2A=""
 UUID=""
@@ -114,7 +115,8 @@ discover () {
     answerUUID="$(cat ${originalAnswer} | grep -o -P '(?<=<id>).*(?=</id>)' | tail -n +2)"
     answerSize="$(cat ${originalAnswer} | grep -o -P '(?<=<str name="size">).*(?=</str>)')"
     answerCloud="$(cat ${originalAnswer} | grep -o -P '(?<=<double name="cloudcoverpercentage">).*(?=</double>)')"
-    paste -d ',' <(echo "${answerS2A}") <(echo "${answerUUID}") <(echo "${answerSize}") <(echo "${answerCloud}") >> ${answersfile}
+    answersWkt="$(cat ${originalAnswer} | grep -o -P '(?<=<str name="footprint">).*(?=</str>)')"
+    paste -d ',' <(echo "${answerS2A}") <(echo "${answerUUID}") <(echo "${answerSize}") <(echo "${answerCloud}") <(echo "${answersWkt}") >> ${answersfile}
     answers="NAME										| UUID		 			| SIZE | CLOUDCOVERAGE\n"
     answers="$answers$(paste -d '	' <(echo "${answerS2A}") <(echo "${answerUUID}") <(echo "${answerSize}") <(echo "${answerCloud}"))"
     rm ${originalAnswer}
@@ -164,12 +166,12 @@ discovermore
 echo "$(tput setaf 6) Up to which cloudcoverage in percent are you interested in the data?$(tput sgr0)"
 read wishcloud
 totalsize="0"
-while IFS=, read -r S2A UUID SIZEFULL CLOUDFULL; do
+while IFS=, read -r S2A UUID SIZEFULL CLOUDFULL WKT; do
     CLOUD=${CLOUDFULL%.*}
     SIZE=${SIZEFULL%.*}
     if [[ ${CLOUD} -le ${wishcloud} ]]
     then
-        echo "${S2A},${UUID},${SIZEFULL},${CLOUDFULL}" >> ${answersunclouded}
+        echo "${S2A},${UUID},${SIZEFULL},${CLOUDFULL},${WKT}" >> ${answersunclouded}
         if [[ ${SIZE} -ge "99" ]]
         then
             SIZE="1"
@@ -179,6 +181,22 @@ while IFS=, read -r S2A UUID SIZEFULL CLOUDFULL; do
 done < ${answersfile}
 newcount="$(cat ${answersunclouded} | wc -l )"
 echo -e "$(tput setaf 2) There are ${newcount} files left with a total size of more than ${totalsize} GB\n$(tput sgr0)"
+
+
+#######################################################################
+# Extract preview geometries                                          #
+#######################################################################
+echo
+echo -n "$(tput setaf 6) Do you want to extract ALL preview geometries from the data you requested?"
+read -p "\n ... $(tput bold)(y/n)$(tput sgr0)" -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]
+then
+    while IFS=, read -r S2A UUID SIZE CLOUD WKT; do
+        echo ${WKT} > ${outputfolder}${UUID}.wkt
+    done < ${answersunclouded}
+    echo -e "$(tput setaf 2) All Polygons saved"
+fi
 
 
 #######################################################################
