@@ -21,13 +21,13 @@ user=""
 password=""
 
 # ask for credentials - outcomment if you declare above
-echo "Please enter Username for ESAs Scihub: "
+echo "$(tput setaf 6)Please enter Username for ESAs Scihub: "
 read user
 echo "Please enter Password: "
 read password
 
 #coordinates need to be in EPSG:4326 like "x1 y1, x2 y2, x3 y3, ..., x1 y1"
-polygonfile="mongolia"
+polygonfile="germany"
 
 #######################################################################
 # Declaring variables which User don't need to touch...               #
@@ -41,11 +41,13 @@ previewfolder="${outputfolder}preview/${polygonfile}/"
 requestLog="${outputfolder}request_log.txt"
 request="${outputfolder}request.sh"
 originalAnswer="${outputfolder}sentinel-query.xml"
-answersfile="${outputfolder}answers.txt"
+answersfile="${outputfolder}answers.csv"
+answersunclouded="${outputfolder}answersunclouded.csv"
 wgetinput="${outputfolder}wgetinput.txt"
 #... for variables which need to be declared on the fly
 polygon=""
 count=""
+newcount=""
 answerS2A=""
 answerUUID=""
 answerSize=""
@@ -71,7 +73,32 @@ mkdir -p ${previewfolder}
 #######################################################################
 # Requesting data which intersects with given polygon                 #
 #######################################################################
-echo -e " Requesting data from ${baseUri}...\n $(tput setaf 7)"
+#count available data
+echo -e " Counting available data from ${baseUri}...\n $(tput setaf 7)"
+wgeturl="'${baseUri}/search?q=S2A* AND footprint:\"Intersects(POLYGON((${polygon})))\"&start=${start}&rows=1' "
+echo ${wget} -O ${originalAnswer} ${wgeturl} > ${request}
+chmod +x ${request}
+./${request}
+echo $(date) $(cat ${request}) >> ${requestLog}
+#extracting necessary information from response
+echo "..."
+count="$(cat ${originalAnswer} | grep -o -P '(?<=<opensearch:totalResults>).*(?=</opensearch:totalResults>)')"
+echo -e "$(tput setaf 2) There are ${count} files available in the selected region:\n"
+
+#ask, how much data should be requested
+echo
+read -p "$(tput setaf 6) Do you want to request all available data at once? $(tput bold)(y/n)$(tput sgr0)$(tput setaf 7)" -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]
+then
+    rows=${count}
+else
+    echo -e "\n $(tput setaf 6) How many do you want to request at once?$(tput sgr0)"
+    read rows
+fi
+
+#request the data
+echo -e "$(tput setaf 2) Requesting data from ${baseUri}...\n $(tput setaf 7)"
 wgeturl="'${baseUri}/search?q=S2A* AND footprint:\"Intersects(POLYGON((${polygon})))\"&start=${start}&rows=${rows}' "
 #wgeturl="'${baseUri}/search?q=S2A* AND footprint:\"Intersects(POLYGON((${polygon})))\"&start=${start}&rows=${rows}&format=json' "
 
@@ -102,8 +129,7 @@ exit
 fi
 #TODO test if there is a mistake returned by the request
 #else there is data found
-echo -e "$(tput setaf 2) There are ${count} files available in the selected region:\n"
-echo -e "${answers}\n $(tput setaf 7)"
+echo -e "$(tput setaf 2) ${answers}\n $(tput setaf 7)"
 
 
 #######################################################################
@@ -117,7 +143,7 @@ while (( ${count} > $((${start} + ${rows})) )); do
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]
     then
-        echo -e "\n $(tput setaf 6) Requesting from $((${start}+1)) to $((${start} + ${rows})) $(tput setaf 7) \n"
+        echo -e "\n $(tput setaf 2) Requesting from $((${start}+1)) to $((${start} + ${rows})) $(tput setaf 7) \n"
         wgeturl="'${baseUri}/search?q=S2A* AND footprint:\"Intersects(POLYGON((${polygon})))\"&start=${start}&rows=${rows}' "
         discover
         echo -e "$(tput setaf 2) ${answers}\n $(tput setaf 7)"
@@ -127,22 +153,43 @@ while (( ${count} > $((${start} + ${rows})) )); do
         return
     fi
 done
+echo -e "$(tput setaf 2) You requested all available data\n $(tput setaf 7)"
 }
 discovermore
-echo -e "$(tput setaf 2) You requested all available data\n $(tput setaf 7)"
+
+
+#######################################################################
+# Decide Cloud Coverage                                               #
+#######################################################################
+echo "$(tput setaf 6) Up to which cloudcoverage in percent are you interested in the data?$(tput sgr0)"
+read wishcloud
+totalsize="0"
+while IFS=, read -r S2A UUID SIZEFULL CLOUDFULL; do
+    CLOUD=${CLOUDFULL%.*}
+    SIZE=${SIZEFULL%.*}
+    if [[ ${CLOUD} -le ${wishcloud} ]]
+    then
+        echo "${S2A},${UUID},${SIZEFULL},${CLOUDFULL}" >> ${answersunclouded}
+        if [[ ${SIZE} -ge "99" ]]
+        then
+            SIZE="1"
+        fi
+        totalsize=$((${totalsize} + ${SIZE}))
+    fi
+done < ${answersfile}
+newcount="$(cat ${answersunclouded} | wc -l )"
+echo -e "$(tput setaf 2) There are ${newcount} files left with a total size of more than ${totalsize} GB\n$(tput sgr0)"
 
 
 #######################################################################
 # Requesting each UUID for each data for download                     #
 #######################################################################
 echo
-read -p "$(tput setaf 6) Do you want to list all requested UUIDs? $(tput bold)(y/n)$(tput sgr0)$(tput setaf 7)" -n 1 -r
+read -p "$(tput setaf 6) Do you want to list all requested data? $(tput bold)(y/n)$(tput sgr0)$(tput setaf 7)" -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]
 then
-    while IFS=, read -r S2A UUID SIZE CLOUD; do
-        echo -e "${UUID} $(tput setaf 7)"
-    done < ${answersfile}
+    echo -e "$(tput setaf 2) $(cat ${answersunclouded}) $(tput setaf 7)"
 fi
 
 
@@ -165,7 +212,7 @@ then
         echo -e "Download request for ${S2A} is: \n  $(cat ${request})"
         echo -e "and input is $(cat ${wgetinput}) $(tput setaf 7)"
         ./${request}
-    done < ${answersfile}
+    done < ${answersunclouded}
 fi
 
 #######################################################################
@@ -187,7 +234,7 @@ then
         echo -e "Download request for ${S2A} is: \n  $(cat ${request})"
         echo -e "and input is $(cat ${wgetinput}) $(tput setaf 7)"
         ./${request}
-    done < ${answersfile}
+    done < ${answersunclouded}
 fi
 
 
@@ -202,4 +249,5 @@ then
     rm -f ${request} ${wgetinput}
     rm -f ${originalAnswer}
     rm -f ${answersfile}
+    rm -f ${answersunclouded}
 fi
